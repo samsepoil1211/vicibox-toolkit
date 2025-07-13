@@ -46,7 +46,7 @@ Edit
 wget https://github.com/your-repo/create_vicidial_users_phones.sh
 chmod +x create_vicidial_users_phones.sh
 ```
-3. **Run the script
+3. **Run the script**
 ```bash
 ./create_vicidial_users_phones.sh
 ```
