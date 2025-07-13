@@ -71,4 +71,16 @@ chmod +x create_vicidial_users_phones.sh
 ✅ Created phone 3002 on server 192.168.1.100
 ...
 🎉 User and phone creation complete. Starting from clean ID above 3001!
+```
+
+📋 To-Do / Coming Soon
+ Support for WebRTC phones
+
+ Auto-linking phones to users
+
+ CSV export of created entries
+
+ Cluster-aware version (for multi-dialer setups)
+
+
 
