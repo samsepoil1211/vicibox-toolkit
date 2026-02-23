@@ -31,6 +31,7 @@ LOG_DIRS=(
     "/var/log/asterisk"
     "/var/log/astguiclient"
     "$APACHE_LOG_DIR"
+    "/var/log/amd"
 )
 
 echo "----------------------------------------"
@@ -93,4 +94,3 @@ fi
 echo
 echo "📝 Log recorded in: $LOGFILE"
 echo "----------------------------------------"
-
