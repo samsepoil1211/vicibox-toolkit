@@ -1,6 +1,6 @@
 #!/bin/bash
 # -----------------------------------------------------------
-# VICIdial Log Cleanup Script (Dynamic for OpenSUSE / Alma / RHEL)
+# VICIdial Log & Database Cleanup Script 
 # Author: Debjit (Beltalk Technology)
 # -----------------------------------------------------------
 
@@ -35,14 +35,14 @@ LOG_DIRS=(
 )
 
 echo "----------------------------------------"
-echo "🧹 VICIdial Log Cleanup Script Started"
+echo "🧹 VICIdial System Cleanup Script Started"
 echo "----------------------------------------"
 echo "Detected OS: $ID"
 echo "Apache log directory: $APACHE_LOG_DIR"
-echo "Threshold: ${THRESHOLD_MB}MB"
 echo "Start time: $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo
 
+# --- Phase 1: File System Cleanup ---
 TOTAL_SIZE=0
 for DIR in "${LOG_DIRS[@]}"; do
     if [ -d "$DIR" ]; then
@@ -55,14 +55,13 @@ done
 
 TOTAL_MB=$(echo "scale=2; $TOTAL_SIZE/1024/1024" | bc)
 echo
-echo "📦 Total log size: ${TOTAL_MB} MB"
+echo "📦 Total file log size: ${TOTAL_MB} MB"
 
 if (( TOTAL_SIZE > THRESHOLD_BYTES )); then
-    echo "⚠️  Log size exceeded ${THRESHOLD_MB}MB. Cleaning up..."
+    echo "⚠️  File log size exceeded ${THRESHOLD_MB}MB. Cleaning up files..."
 
     for DIR in "${LOG_DIRS[@]}"; do
         if [ -d "$DIR" ]; then
-            # Remove common VICIdial junk log formats
             find "$DIR" -type f \( \
                 -name "*.log" -o \
                 -name "*.old" -o \
@@ -74,23 +73,39 @@ if (( TOTAL_SIZE > THRESHOLD_BYTES )); then
             \) -delete
         fi
     done
-
-    echo "✅ All junk logs deleted successfully."
-    echo "🕒 Cleanup completed at $(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "✅ All junk file logs deleted."
 else
-    echo "✅ Log size under ${THRESHOLD_MB}MB. No cleanup needed."
+    echo "✅ File log size under ${THRESHOLD_MB}MB. No file cleanup needed."
 fi
 
+# --- Phase 2: MySQL Archive Truncation ---
+echo
+echo "🗄️  Wiping MySQL Archive Tables..."
+mysql -e "
+TRUNCATE TABLE asterisk.call_log_archive;
+TRUNCATE TABLE asterisk.vicidial_log_archive;
+TRUNCATE TABLE asterisk.vicidial_log_extended_archive;
+TRUNCATE TABLE asterisk.vicidial_dial_log_archive;
+TRUNCATE TABLE asterisk.vicidial_dial_cid_log_archive;
+TRUNCATE TABLE asterisk.vicidial_carrier_log_archive;
+TRUNCATE TABLE asterisk.vicidial_agent_log_archive;
+TRUNCATE TABLE asterisk.vicidial_agent_visibility_log_archive;
+TRUNCATE TABLE asterisk.vicidial_amd_log_archive;
+"
+echo "✅ MySQL Archive tables successfully truncated."
+
+# --- Phase 3: Logging ---
 {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] OS: $ID | Total Size: ${TOTAL_MB}MB"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] OS: $ID | Total File Size: ${TOTAL_MB}MB"
     if (( TOTAL_SIZE > THRESHOLD_BYTES )); then
-        echo "Action: Deleted all junk log files (*.log, *.gz, *.old, screenlog.*, etc.)"
+        echo "Action: Deleted file logs and truncated MySQL archives."
     else
-        echo "Action: No cleanup required"
+        echo "Action: Truncated MySQL archives only (File logs under threshold)."
     fi
     echo "----------------------------------------"
 } >> "$LOGFILE"
 
 echo
+echo "🕒 Cleanup completed at $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo "📝 Log recorded in: $LOGFILE"
 echo "----------------------------------------"
