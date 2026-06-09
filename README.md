@@ -327,4 +327,207 @@ If you want, I can:
 - Or prepare a separate script/template for installing the create_vicidial_users_phones.sh if you provide its original source or desired behavior.
 
 
+# VICIdial Independent Dual Dialing
+
+Enable two fully independent agent panel sessions on a single VICIdial server — same agent, two browser tabs, independent dialing and dispo per tab.
+
+Built for physical SIP phone setups (Eyebeam, X-Lite, or any hardphone).
+
+---
+
+## What This Does
+
+By default, VICIdial blocks duplicate agent logins with a session killer — opening a second tab logs out the first. This script removes that restriction and sets up a shadow `_B` account for each agent, giving each tab its own independent Asterisk conference slot, dial session, and dispo workflow.
+
+| Feature | Status |
+|---|---|
+| Dialing | ✅ Independent per tab |
+| Dispo | ✅ Independent per tab |
+| Lead data / script | ✅ Independent per tab |
+| Pause / Ready | ✅ Independent per tab |
+| Hangup | ❌ Not independent (SIP phone hardware limitation) |
+
+> **Why hangup is not independent:** Both tabs share the same physical SIP channel on Asterisk (`SIP/1001-xxxx`). When either tab sends a hangup command, Asterisk drops the physical call — both tabs detect it. This is a hardware-level limitation of running one SIP account on one phone. It cannot be fixed in software without two separate SIP registrations.
+
+---
+
+## Requirements
+
+- VICIdial 2.x (tested on 2.14-725c)
+- OpenSUSE Leap 15 / CentOS / Debian (any standard Linux)
+- Asterisk with `chan_sip` or `chan_pjsip`
+- Physical SIP phone per agent (Eyebeam, X-Lite, Zoiper, or hardphone)
+- Root access on the VICIdial server
+- MySQL / MariaDB access
+
+---
+
+## How It Works
+
+### PHP Patches (3 changes)
+
+**`vicidial.php` — Session killer disabled**
+VICIdial tracks duplicate logins via `$vlaLIaffected_rows`. When a second login is detected, this counter triggers a session kill popup. The patch forces this counter to always return `0`, so the second tab loads normally.
+
+**`vicidial.php` — Disabled session popup suppressed**
+The `AgenTDisablEBoX` JavaScript div that overlays the panel when a session is killed is suppressed so it never fires.
+
+**`vdc_db_query.php` — INCALL block bypassed**
+VICIdial blocks dial actions when `vla_status = 'INCALL'` to prevent double-dialing on the same session. Since `_B` is a separate DB record, this block is bypassed with `&& false` so the second tab can dial freely.
+
+### Database Changes (3 additions per agent)
+
+**`vicidial_users`** — A `_B` clone of each agent is created with identical permissions and the same password. Example: agent `1001` → shadow `1001_B`.
+
+**`phones`** — A `_B` phone entry is created with offset conference and park extension numbers (`original + 10000`) so each session has its own Asterisk conference space.
+
+**`vicidial_conferences`** — A free conference slot is assigned to `SIP/1001_B` so VICIdial can place the `_B` session into its own Asterisk conference bridge at login.
+
+### Cron Job
+
+A cron job is installed at `/etc/cron.d/vicidial_dual_dial` that runs every 5 minutes. Any new agent created in VICIdial automatically gets a `_B` account within 5 minutes — no manual action needed.
+
+---
+
+## Installation
+
+### On a fresh server (no previous patches)
+
+```bash
+chmod +x vicidial_dual_dial.sh
+bash vicidial_dual_dial.sh
+```
+
+The script auto-detects:
+- VICIdial webroot path
+- MySQL credentials (tries common VICIdial defaults, then reads `/etc/astguiclient.conf`)
+- Server IP from the `servers` table
+
+### On a server with previous manual patches applied
+
+Run with `--revert` first to clean up, then run fresh:
+
+```bash
+bash vicidial_dual_dial.sh --revert
+bash vicidial_dual_dial.sh
+```
+
+---
+
+## Usage
+
+### Agent Login Instructions
+
+| | Tab 1 | Tab 2 |
+|---|---|---|
+| **Browser** | Chrome (normal) | Chrome Incognito (`Ctrl+Shift+N`) |
+| **Username** | `1001` | `1001_B` |
+| **Password** | same as normal | same as normal |
+| **Phone Extension** | `1001` | `1001_B` |
+| **Campaign** | any | any |
+
+Both tabs connect to the **same physical Eyebeam/SIP phone** for audio. Each tab dials, tracks, and dispos its own calls completely independently.
+
+---
+
+## Commands
+
+```bash
+# Full setup (first run)
+bash vicidial_dual_dial.sh
+
+# Check patch status
+bash vicidial_dual_dial.sh --status
+
+# List all _B shadow users and phone entries
+bash vicidial_dual_dial.sh --list
+
+# Sync only — create _B for any new agents (cron uses this)
+bash vicidial_dual_dial.sh --sync
+
+# Full rollback — removes all patches and _B entries
+bash vicidial_dual_dial.sh --revert
+```
+
+---
+
+## Multi-Server Deployment
+
+To deploy on multiple servers, copy the script to each server and run it. The script is fully self-contained and auto-detects all settings per server.
+
+```bash
+# Example: deploy to multiple servers via SSH
+for SERVER in dial226 dial755 dial151; do
+    scp vicidial_dual_dial.sh root@$SERVER:/root/
+    ssh root@$SERVER "bash /root/vicidial_dual_dial.sh"
+done
+```
+
+---
+
+## Rollback
+
+To fully revert all changes on any server:
+
+```bash
+bash vicidial_dual_dial.sh --revert
+```
+
+This will:
+- Restore original `vicidial.php` and `vdc_db_query.php` from backup
+- Delete all `_B` users from `vicidial_users`
+- Delete all `_B` entries from `phones`
+- Clear `_B` conf slot assignments in `vicidial_conferences`
+- Remove the cron job
+
+Backups are stored at `/root/vicidial_dual_dial_backup_YYYYMMDD_HHMMSS/`.
+
+---
+
+## Files Modified
+
+| File | Change |
+|---|---|
+| `/srv/www/htdocs/agc/vicidial.php` | 3 line patches |
+| `/srv/www/htdocs/agc/vdc_db_query.php` | 1 line patch |
+| `vicidial_users` (DB table) | `_B` rows added |
+| `phones` (DB table) | `_B` rows added |
+| `vicidial_conferences` (DB table) | `_B` conf slots assigned |
+| `/etc/cron.d/vicidial_dual_dial` | Cron job installed |
+
+> Webroot path auto-detected. Default above is for OpenSUSE Leap 15. On CentOS/Debian the path is typically `/var/www/html/agc`.
+
+---
+
+## Tested On
+
+| Component | Version |
+|---|---|
+| VICIdial | 2.14-725c BUILD: 260529-0914 |
+| OS | OpenSUSE Leap 15 |
+| Asterisk | 16.x with chan_sip |
+| SIP Phone | Eyebeam (physical) |
+| Browser | Chrome 125+ |
+
+---
+
+## Known Limitations
+
+- **Hangup is shared** — dropping a call from either tab ends the physical call on the SIP phone. Both tabs detect the hangup event. This is a physical SIP channel limitation and cannot be resolved in software with a single SIP registration.
+- **VICIdial updates** — updates to `vicidial.php` or `vdc_db_query.php` will overwrite the patches. Re-run the script after any VICIdial upgrade. The `_B` DB entries and cron job are unaffected by upgrades.
+- **WebRTC softphone not supported** — this script is designed for physical SIP phones only. WebRTC (VICIphone) does not support dual registration on the same SIP extension.
+- **Username length** — agent usernames longer than 18 characters are skipped (VICIdial `user` field is `varchar(20)`, `_B` suffix requires 2 extra characters).
+
+---
+
+## License
+
+MIT License. Free to use, modify, and distribute.
+
+---
+
+## Author
+
+Built for VICIdial production environments running physical SIP phone infrastructure.
+Tested and validated on live production servers.
 
